@@ -3,6 +3,7 @@ import { resolve } from "path";
 import CodeFile from "./CodeFile";
 import ErrorCollector from "./ErrorCollector";
 import LexingError from "./errors/LexingError";
+import LexingWarning from "./errors/LexingWarning";
 import {
   MultiLineComment,
   NewLineExtraToken,
@@ -450,13 +451,20 @@ describe("Lexer", () => {
   });
 
   describe("string lexing", () => {
-    function testStringLexing(source: string) {
-      const tokens = lexTokens(source);
+    function lexOneString(source: string) {
+      const errorCollector = new ErrorCollector();
+      const lexer = new Lexer(new CodeFile("<test>", source), errorCollector);
+      const tokens = lexer.scan();
       if (!(tokens[0] instanceof LiteralToken)) {
         throw new Error("First token is not a literal. Fix that test!");
       }
-
-      return (tokens[0] as LiteralToken<string>).value;
+      return {
+        value: (tokens[0] as LiteralToken<string>).value,
+        errorCollector,
+      };
+    }
+    function testStringLexing(source: string) {
+      return lexOneString(source).value;
     }
     it("lexes simple strings", () => {
       expect(testStringLexing(`"hello"`)).toEqual("hello");
@@ -469,11 +477,84 @@ describe("Lexer", () => {
         'a\nb\t\rc\\gg"g'
       );
     });
-    it("throws LexingError on invalid escape sequences", () => {
-      expect(() => testStringLexing(`"\\XD"`)).toThrowError(LexingError);
-    });
     it("throws LexingError on unterminated strings", () => {
       expect(() => testStringLexing(`"aaaa`)).toThrowError(LexingError);
+    });
+
+    describe("undefined escape sequences (matching real OpenSCAD)", () => {
+      it("warns instead of throwing, and drops the backslash", () => {
+        const { value, errorCollector } = lexOneString(`"\\XD"`);
+        expect(value).toEqual("XD");
+        expect(errorCollector.hasErrors()).toBe(false);
+        expect(errorCollector.warnings).toHaveLength(1);
+        expect(errorCollector.warnings[0]).toBeInstanceOf(LexingWarning);
+      });
+      it("does not consume anything past the backslash, so a partial escape falls back char-by-char", () => {
+        expect(testStringLexing(`"short\\u12end"`)).toEqual("shortu12end");
+        expect(testStringLexing(`"hex\\x99end"`)).toEqual("hexx99end");
+      });
+    });
+
+    describe("line continuation", () => {
+      it("swallows a backslash followed by a newline", () => {
+        expect(testStringLexing(`"line\\\ncontinued"`)).toEqual(
+          "linecontinued"
+        );
+      });
+      it("swallows a backslash followed by a CRLF", () => {
+        expect(testStringLexing(`"line\\\r\ncontinued"`)).toEqual(
+          "linecontinued"
+        );
+      });
+    });
+
+    describe("\\x hex byte escapes", () => {
+      it("decodes two hex digits, the first restricted to 0-7", () => {
+        expect(testStringLexing(`"hex\\x41end"`)).toEqual("hexAend");
+        expect(testStringLexing(`"hex\\x7Fend"`)).toEqual("hex\x7Fend");
+      });
+      it("decodes \\x00 to a space, not a NUL byte", () => {
+        expect(testStringLexing(`"zero\\x00end"`)).toEqual("zero end");
+      });
+      it("falls back to a warning when the first digit is out of range", () => {
+        const { value, errorCollector } = lexOneString(`"hex\\x99end"`);
+        expect(value).toEqual("hexx99end");
+        expect(errorCollector.warnings).toHaveLength(1);
+      });
+    });
+
+    describe("\\u and \\U unicode escapes", () => {
+      it("decodes a lowercase \\u with exactly 4 hex digits", () => {
+        expect(testStringLexing(`"unicode\\u00A3smthg"`)).toEqual(
+          "unicode£smthg"
+        );
+      });
+      it("decodes an uppercase \\U with exactly 6 hex digits", () => {
+        expect(testStringLexing(`"big\\U01F600end"`)).toEqual(
+          "big\u{1F600}end"
+        );
+      });
+      it("only consumes the first 6 hex digits of \\U, leaving the rest literal", () => {
+        expect(testStringLexing(`"big\\U0001F600end"`)).toEqual(
+          "bigǶ00end"
+        );
+      });
+      it("decodes codepoint 0 to a space", () => {
+        expect(testStringLexing(`"zero\\u0000end"`)).toEqual("zero end");
+      });
+      it("decodes an invalid surrogate half to a space", () => {
+        expect(testStringLexing(`"surr\\uD800end"`)).toEqual("surr end");
+      });
+      it("decodes a codepoint above U+10FFFF to a space", () => {
+        expect(testStringLexing(`"toobig\\U110000end"`)).toEqual(
+          "toobig end"
+        );
+      });
+      it("falls back to a warning when there aren't enough hex digits", () => {
+        const { value, errorCollector } = lexOneString(`"short\\u12end"`);
+        expect(value).toEqual("shortu12end");
+        expect(errorCollector.warnings).toHaveLength(1);
+      });
     });
   });
   describe("use statement lexing", () => {
