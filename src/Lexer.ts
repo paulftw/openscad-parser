@@ -295,6 +295,18 @@ export default class Lexer {
     }
     this.addToken(TokenType.NumberLiteral, value);
   }
+  protected consumeHexNumberLiteral() {
+    this.advance(); // 0
+    this.advance(); // x
+    while (/[0-9a-fA-F]/.test(this.peek())) {
+      this.advance();
+    }
+    const lexeme = this.codeFile.code.substring(
+      this.start.char,
+      this.charOffset
+    );
+    this.addToken(TokenType.NumberLiteral, parseInt(lexeme.slice(2), 16));
+  }
   protected consumeIdentifierOrKeyword() {
     while (/[A-Za-z0-9_\$]/.test(this.peek()) && !this.isAtEnd()) {
       this.advance();
@@ -328,6 +340,17 @@ export default class Lexer {
       /[0-9a-zA-Z_\$]/.test(this.codeFile.code[this.start.char + wordLength])
     ) {
       wordLength++;
+    }
+
+    // Real openscad only recognizes a lowercase "0x" prefix - "0X1A", "0x1g"
+    // (an invalid hex digit) and "0x" (no digits) all fall through to being
+    // lexed as an identifier instead, with the usual leading-digit
+    // deprecation warning. Checked first since a match here is always at
+    // least as long as `possibleNumberStarts` below can get on the same
+    // input (that regex only sees the leading "0").
+    const hexMatch = this.peekRegex(/^0x[0-9a-fA-F]+/);
+    if (hexMatch.length >= wordLength) {
+      return this.consumeHexNumberLiteral();
     }
 
     const possibleNumberStarts = [
