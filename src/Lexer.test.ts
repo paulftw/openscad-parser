@@ -322,10 +322,6 @@ describe("Lexer", () => {
       ]);
     });
 
-    // Ground truth verified directly against a local openscad install:
-    // hex literals use a lowercase "0x" prefix only - "0X..." falls through
-    // to being lexed as a plain (deprecated, leading-digit) identifier, same
-    // as an out-of-range digit like "0x1g" or a bare "0x" with no digits.
     it("lexes hexadecimal integer literals", () => {
       expect(testNumberLexing("0x0")).toEqual(0);
       expect(testNumberLexing("0xff")).toEqual(255);

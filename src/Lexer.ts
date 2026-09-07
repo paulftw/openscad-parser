@@ -342,12 +342,8 @@ export default class Lexer {
       wordLength++;
     }
 
-    // Real openscad only recognizes a lowercase "0x" prefix - "0X1A", "0x1g"
-    // (an invalid hex digit) and "0x" (no digits) all fall through to being
-    // lexed as an identifier instead, with the usual leading-digit
-    // deprecation warning. Checked first since a match here is always at
-    // least as long as `possibleNumberStarts` below can get on the same
-    // input (that regex only sees the leading "0").
+    // Only lowercase "0x" is a hex prefix - "0X1A", "0x1g", "0x" fall
+    // through to being lexed as an identifier.
     const hexMatch = this.peekRegex(/^0x[0-9a-fA-F]+/);
     if (hexMatch.length >= wordLength) {
       return this.consumeHexNumberLiteral();
