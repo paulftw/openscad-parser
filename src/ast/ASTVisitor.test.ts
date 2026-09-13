@@ -167,13 +167,13 @@ describe("ASTVisitor", () => {
         visitAssertExpr(); // call the mocked function so that jest knows it has been called
         expect(n).toBeInstanceOf(AssertExpr);
         n.args.forEach((a) => a.accept(this));
-        n.expr.accept(this);
+        n.expr?.accept(this);
       }
       visitEchoExpr(n: EchoExpr) {
         visitEchoExpr(); // call the mocked function so that jest knows it has been called
         expect(n).toBeInstanceOf(EchoExpr);
         n.args.forEach((a) => a.accept(this));
-        n.expr.accept(this);
+        n.expr?.accept(this);
       }
       visitLcIfExpr(n: LcIfExpr) {
         visitLcIfExpr(); // call the mocked function so that jest knows it has been called

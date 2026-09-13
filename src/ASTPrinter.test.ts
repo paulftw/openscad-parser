@@ -262,6 +262,16 @@ enum_value = "a";
       x = [for(alpha) 1];
     `);
   });
+  it("preserves comments around 'assert' and 'echo' expressions without a trailing expression", () => {
+    doPreserveTest(`
+      x = assert(false);
+      y = echo("hi");
+    `);
+  });
+  it("prints 'assert' and 'echo' expressions without a trailing expression as written", () => {
+    expect(doFormat(`x = assert(false);`).trim()).toEqual(`x = assert(false);`);
+    expect(doFormat(`x = echo("hi");`).trim()).toEqual(`x = echo("hi");`);
+  });
   it("correctly handles comments after chained module instantiations", () => {
     const formatted = doFormat(`
 $fn=4;// a comment

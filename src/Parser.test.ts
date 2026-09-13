@@ -1204,6 +1204,30 @@ describe("Parser", () => {
     expect(e.args[0].value).toBeInstanceOf(BinaryOpExpr);
     expect(e.expr).toBeInstanceOf(BinaryOpExpr);
   });
+  it("parses the 'assert' expression without a trailing expression", () => {
+    const file = doParse(`x = assert(false);`);
+    const e = (file.statements[0] as any).value as AssertExpr;
+    expect(e).toBeInstanceOf(AssertExpr);
+    expect(e.expr).toBeNull();
+  });
+  it("parses the 'echo' expression without a trailing expression", () => {
+    const file = doParse(`x = echo("hi");`);
+    const e = (file.statements[0] as any).value as EchoExpr;
+    expect(e).toBeInstanceOf(EchoExpr);
+    expect(e.expr).toBeNull();
+  });
+  it("parses a vector literal as the 'assert' expression's trailing expression", () => {
+    const file = doParse(`x = assert(true) [1, 2];`);
+    const e = (file.statements[0] as any).value as AssertExpr;
+    expect(e).toBeInstanceOf(AssertExpr);
+    expect(e.expr).toBeInstanceOf(VectorExpr);
+  });
+  it("parses a unary-minus trailing expression after 'assert', matching real OpenSCAD's shift-preference on this ambiguity", () => {
+    const file = doParse(`x = assert(true) -5;`);
+    const e = (file.statements[0] as any).value as AssertExpr;
+    expect(e).toBeInstanceOf(AssertExpr);
+    expect(e.expr).toBeInstanceOf(UnaryOpExpr);
+  });
   it("peekNext does not crash when at end", () => {
     class ExtendedParser extends Parser {
       __test() {

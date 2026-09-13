@@ -294,8 +294,10 @@ export default class ASTPrinter implements ASTVisitor<string> {
     }
     source += this.stringifyExtraTokens(n.tokens.secondParen);
     source += ")";
-    source += " ";
-    source += n.expr.accept(this);
+    if (n.expr) {
+      source += " ";
+      source += n.expr.accept(this);
+    }
     return source;
   }
   visitEchoExpr(n: EchoExpr): string {
@@ -313,8 +315,10 @@ export default class ASTPrinter implements ASTVisitor<string> {
     }
     source += this.stringifyExtraTokens(n.tokens.secondParen);
     source += ")";
-    source += " ";
-    source += n.expr.accept(this);
+    if (n.expr) {
+      source += " ";
+      source += n.expr.accept(this);
+    }
     return source;
   }
   visitLcIfExpr(n: LcIfExpr): string {

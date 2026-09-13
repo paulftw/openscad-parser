@@ -182,7 +182,7 @@ export default class ASTMutator
     return new LetExpr(newArgs, newExpr, n.tokens);
   }
   visitAssertExpr(n: AssertExpr): ASTNode {
-    const newExpr = n.expr.accept(this);
+    const newExpr = n.expr ? n.expr.accept(this) : null;
     const newArgs = n.args.map((a) => a.accept(this)) as AssignmentNode[];
     if (newArgs.length === n.args.length && newExpr === n.expr) {
       let modified = false;
@@ -198,7 +198,7 @@ export default class ASTMutator
     return new AssertExpr(newArgs, newExpr, n.tokens);
   }
   visitEchoExpr(n: EchoExpr): ASTNode {
-    const newExpr = n.expr.accept(this);
+    const newExpr = n.expr ? n.expr.accept(this) : null;
     const newArgs = n.args.map((a) => a.accept(this)) as AssignmentNode[];
     if (newArgs.length === n.args.length && newExpr === n.expr) {
       let modified = false;
