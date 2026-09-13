@@ -162,14 +162,14 @@ export default class ASTScopePopulator implements ASTVisitor<ASTNode> {
   visitAssertExpr(n: AssertExpr): ASTNode {
     return new AssertExpr(
       n.args.map((a) => a.accept(this)) as AssignmentNode[],
-      n.expr.accept(this),
+      n.expr ? n.expr.accept(this) : null,
       n.tokens
     );
   }
   visitEchoExpr(n: EchoExpr): ASTNode {
     return new EchoExpr(
       n.args.map((a) => a.accept(this)) as AssignmentNode[],
-      n.expr.accept(this),
+      n.expr ? n.expr.accept(this) : null,
       n.tokens
     );
   }

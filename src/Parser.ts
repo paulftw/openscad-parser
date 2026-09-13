@@ -921,7 +921,10 @@ export default class Parser {
       const firstParen = this.previous();
       const vars = this.args(true);
       const secondParen = this.previous();
-      const innerExpr = this.expression();
+      // the trailing expression is optional - `assert(cond)` alone is a
+      // valid expression (evaluating to undef), matching real OpenSCAD's
+      // grammar where the assert-expression's body is optional
+      const innerExpr = this.canStartExpression() ? this.expression() : null;
       return new AssertExpr(vars, innerExpr, {
         firstParen,
         secondParen,
@@ -947,7 +950,8 @@ export default class Parser {
       const firstParen = this.previous();
       const vars = this.args(true);
       const secondParen = this.previous();
-      const innerExpr = this.expression();
+      // same optional trailing expression as assert-expression, above
+      const innerExpr = this.canStartExpression() ? this.expression() : null;
       return new EchoExpr(vars, innerExpr, {
         firstParen,
         secondParen,
@@ -1245,6 +1249,33 @@ export default class Parser {
       return false;
     }
     return this.peek().type == tt;
+  }
+  /**
+   * Whether the upcoming token can begin an `expr` (i.e. it's in FIRST(expr)):
+   * the token types `primary()` dispatches on, plus the unary-prefix tokens
+   * consumed one level up in `unary()`. Used to decide whether the optional
+   * trailing expression after assert-expression/echo-expression is present -
+   * a stand-in for the shift-preference yacc gets for free on this ambiguity.
+   */
+  protected canStartExpression() {
+    return [
+      TokenType.True,
+      TokenType.False,
+      TokenType.Undef,
+      TokenType.NumberLiteral,
+      TokenType.StringLiteral,
+      TokenType.Identifier,
+      TokenType.Assert,
+      TokenType.Let,
+      TokenType.Echo,
+      TokenType.Function,
+      TokenType.LeftParen,
+      TokenType.LeftBracket,
+      TokenType.Plus,
+      TokenType.Minus,
+      TokenType.Bang,
+      TokenType.Tilde,
+    ].some((tt) => this.checkToken(tt));
   }
   protected advance() {
     if (!this.isAtEnd()) {

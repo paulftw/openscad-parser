@@ -291,13 +291,15 @@ export abstract class FunctionCallLikeExpr extends Expression {
   args: AssignmentNode[];
 
   /**
-   * The inner expression which will use the expression.
+   * The inner expression which will use the expression. Only assert-expression
+   * and echo-expression allow this to be absent (`null`) - `assert(cond)` and
+   * `echo(args)` are themselves valid expressions, evaluating to undef.
    */
-  expr: Expression;
+  expr: Expression | null;
 
   constructor(
     args: AssignmentNode[],
-    expr: Expression,
+    expr: Expression | null,
     public tokens: { name: Token; firstParen: Token; secondParen: Token }
   ) {
     super();
@@ -311,6 +313,8 @@ export abstract class FunctionCallLikeExpr extends Expression {
  * @category AST
  */
 export class LetExpr extends FunctionCallLikeExpr {
+  // unlike assert/echo, a let-expression's body is never optional
+  declare expr: Expression;
   accept<R>(visitor: ASTVisitor<R>): R {
     return visitor.visitLetExpr(this);
   }
