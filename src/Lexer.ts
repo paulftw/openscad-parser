@@ -3,7 +3,6 @@ import CodeLocation from "./CodeLocation";
 import CodeSpan from "./CodeSpan";
 import ErrorCollector from "./ErrorCollector";
 import {
-  IllegalStringEscapeSequenceLexingError,
   InvalidNumberLiteralLexingError,
   TooManyDotsInNumberLiteralLexingError,
   TooManyEInNumberLiteralLexingError,
@@ -12,6 +11,7 @@ import {
   UnterminatedMultilineCommentLexingError,
   UnterminatedStringLiteralLexingError,
 } from "./errors/lexingErrors";
+import { UndefinedEscapeSequenceLexingWarning } from "./errors/lexingWarnings";
 import {
   ExtraToken,
   MultiLineComment,
@@ -238,12 +238,34 @@ export default class Lexer {
           str += "\t";
         } else if (this.match("r")) {
           str += "\r";
+        } else if (this.match("\n")) {
+          // line continuation: a backslash followed by a real newline is
+          // swallowed entirely, joining the two physical lines.
+        } else if (this.peek() == "\r" && this.peekNext() == "\n") {
+          this.advance();
+          this.advance();
+        } else if (
+          this.peek() == "x" &&
+          this.isOctalDigit(this.peekAt(1)) &&
+          this.isHexDigit(this.peekAt(2))
+        ) {
+          this.advance(); // x
+          const hex = this.advance() + this.advance();
+          str += this.decodeByteEscape(parseInt(hex, 16));
+        } else if (this.peek() == "u" && this.hasHexDigitsAt(1, 4)) {
+          this.advance(); // u
+          str += this.decodeUnicodeEscape(this.advanceHexDigits(4));
+        } else if (this.peek() == "U" && this.hasHexDigitsAt(1, 6)) {
+          this.advance(); // U
+          str += this.decodeUnicodeEscape(this.advanceHexDigits(6));
         } else {
-          throw this.errorCollector.reportError(
-            new IllegalStringEscapeSequenceLexingError(this.getLoc(), `\\${c}`)
+          this.errorCollector.reportWarning(
+            new UndefinedEscapeSequenceLexingWarning(this.getLoc(), this.peek())
           );
+          // the backslash is simply dropped; whatever follows it (which may
+          // itself look like the start of another escape) is scanned as a
+          // plain character on the next iteration of this loop.
         }
-        //TODO: Add unicode escape sequences handling
       } else {
         str += c;
       }
@@ -255,6 +277,40 @@ export default class Lexer {
     }
     this.advance();
     this.addToken(TokenType.StringLiteral, str);
+  }
+  protected isHexDigit(c: string) {
+    return /[0-9a-fA-F]/.test(c);
+  }
+  protected isOctalDigit(c: string) {
+    return /[0-7]/.test(c);
+  }
+  /** Checks that the `count` characters starting `offset` chars ahead of the current position are all hex digits. */
+  protected hasHexDigitsAt(offset: number, count: number) {
+    for (let i = 0; i < count; i++) {
+      if (!this.isHexDigit(this.peekAt(offset + i))) return false;
+    }
+    return true;
+  }
+  /** Advances past and returns the next `count` characters, assumed to already be verified as hex digits. */
+  protected advanceHexDigits(count: number) {
+    let hex = "";
+    for (let i = 0; i < count; i++) {
+      hex += this.advance();
+    }
+    return hex;
+  }
+  /** A NUL byte can't be embedded in the string, so - like real OpenSCAD - it is replaced with a space. */
+  protected decodeByteEscape(byte: number) {
+    return byte === 0 ? " " : String.fromCharCode(byte);
+  }
+  /** Matches real OpenSCAD: codepoint 0, surrogate halves, and anything past U+10FFFF decode to a single space. */
+  protected decodeUnicodeEscape(hex: string) {
+    const codepoint = parseInt(hex, 16);
+    const isSurrogate = codepoint >= 0xd800 && codepoint <= 0xdfff;
+    if (codepoint === 0 || codepoint > 0x10ffff || isSurrogate) {
+      return " ";
+    }
+    return String.fromCodePoint(codepoint);
   }
   protected consumeNumberLiteral() {
     let ateDigit = /[0-9]/.test(this.codeFile.code[this.start.char]);
@@ -483,6 +539,10 @@ export default class Lexer {
   protected peekNext() {
     if (this.charOffset + 1 >= this.codeFile.code.length) return "\0";
     return this.codeFile.code[this.charOffset + 1];
+  }
+  protected peekAt(offset: number) {
+    if (this.charOffset + offset >= this.codeFile.code.length) return "\0";
+    return this.codeFile.code[this.charOffset + offset];
   }
 
   protected peekRegex(regex: RegExp) {
