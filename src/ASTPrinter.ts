@@ -731,7 +731,7 @@ export default class ASTPrinter implements ASTVisitor<string> {
   }
 
   protected copy() {
-    const next = new ASTPrinter(this.config);
+    const next = new (this.constructor as typeof ASTPrinter)(this.config);
     next.indentLevel = this.indentLevel;
     next.deepGlobals = this.deepGlobals;
     next.breakBetweenModuleInstantations = this.breakBetweenModuleInstantations;

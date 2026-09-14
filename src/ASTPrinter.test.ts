@@ -376,4 +376,25 @@ if(true) {
     );
     errorCollector.throwIfAny();
   });
+
+  it("keeps subclass overrides across copyWithIndent()", () => {
+    class WrappingPrinter extends ASTPrinter {
+      visitBinaryOpExpr(n: Parameters<ASTPrinter["visitBinaryOpExpr"]>[0]) {
+        return "(" + super.visitBinaryOpExpr(n) + ")";
+      }
+    }
+
+    let [ast, errorCollector] = ParsingHelper.parseFile(
+      new CodeFile("<test>", `function f(a) = a + 1;`)
+    );
+    errorCollector.throwIfAny();
+    if (!ast) throw new Error("No AST");
+    ast = new ASTScopePopulator(new Scope()).populate(ast) as ScadFile;
+
+    const formatted = new WrappingPrinter(
+      new FormattingConfiguration()
+    ).visitScadFile(ast);
+
+    expect(formatted).toContain("(a + 1)");
+  });
 });
