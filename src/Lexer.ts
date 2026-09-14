@@ -206,6 +206,8 @@ export default class Lexer {
       case "\r":
       case " ":
       case "\t":
+      case " ": // NBSP - real OpenSCAD's lexer treats it as whitespace
+      case "﻿": // BOM / zero-width no-break space - same, wherever it appears
         break; // ignore whitespace
       case '"':
         this.consumeStringLiteral();

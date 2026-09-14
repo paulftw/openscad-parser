@@ -56,12 +56,26 @@ describe("Lexer", () => {
   });
   it("ignores whitespace", () => {
     const tts = lexToTTStream(`% {
-        
+
     }`);
     expect(tts).toEqual([
       TokenType.Percent,
       TokenType.LeftBrace,
       TokenType.RightBrace,
+      TokenType.Eot,
+    ]);
+  });
+  it("ignores NBSP and BOM/ZWNBSP as whitespace", () => {
+    const tts = lexToTTStream(`a = 1;b﻿=﻿2;`);
+    expect(tts).toEqual([
+      TokenType.Identifier,
+      TokenType.Equal,
+      TokenType.NumberLiteral,
+      TokenType.Semicolon,
+      TokenType.Identifier,
+      TokenType.Equal,
+      TokenType.NumberLiteral,
+      TokenType.Semicolon,
       TokenType.Eot,
     ]);
   });
