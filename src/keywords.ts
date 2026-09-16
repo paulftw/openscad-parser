@@ -3,22 +3,24 @@ import TokenType from "./TokenType";
 /**
  * A dictionary which maps keyword string values to their TokenType.
  */
-const keywords: { [x: string]: TokenType } = {
-  true: TokenType.True,
-  false: TokenType.False,
-  undef: TokenType.Undef,
-  module: TokenType.Module,
-  function: TokenType.Function,
-  if: TokenType.If,
-  else: TokenType.Else,
-  for: TokenType.For,
-  assert: TokenType.Assert,
-  each: TokenType.Each,
-  echo: TokenType.Echo,
-  use: TokenType.Use,
-  let: TokenType.Let,
-  include: TokenType.Include,
-};
+const keywords: { [x: string]: TokenType } = Object.freeze(
+  Object.assign(Object.create(null), {
+    true: TokenType.True,
+    false: TokenType.False,
+    undef: TokenType.Undef,
+    module: TokenType.Module,
+    function: TokenType.Function,
+    if: TokenType.If,
+    else: TokenType.Else,
+    for: TokenType.For,
+    assert: TokenType.Assert,
+    each: TokenType.Each,
+    echo: TokenType.Echo,
+    use: TokenType.Use,
+    let: TokenType.Let,
+    include: TokenType.Include,
+  })
+);
 
 export const keywordDocumentation: { [x: keyof typeof keywords]: string } = {
   true: "Represents the boolean value true.",

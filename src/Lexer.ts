@@ -375,7 +375,9 @@ export default class Lexer {
       this.start.char,
       this.charOffset
     );
-    if (lexeme in keywords) {
+    // Source text is untrusted. `in` also matches Object.prototype members,
+    // turning names such as `constructor` and `__proto__` into invalid token types.
+    if (Object.hasOwn(keywords, lexeme)) {
       const keywordType = keywords[lexeme];
       this.addToken(keywordType);
       // check if we need to lex a filename

@@ -52,14 +52,14 @@ export class ParamAnnotation {
     type: string[];
     conflictsWith: string[];
     possibleValues: string[];
-  } = {
+  } = Object.assign(Object.create(null), {
     positional: false,
     named: false,
     required: false,
     type: [],
     conflictsWith: [],
     possibleValues: [],
-  };
+  });
   constructor(contents: string[]) {
     this.link = contents[0] || "";
     this.description = contents
