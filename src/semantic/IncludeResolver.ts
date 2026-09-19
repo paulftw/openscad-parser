@@ -10,13 +10,13 @@ import CodeLocation from "../CodeLocation";
 
 export class IncludedFileNotFoundError extends CodeError {
   constructor(pos: CodeLocation, filename: string) {
-    super(pos, `Included file '${filename} not found.'`);
+    super(pos, `Included file '${filename}' not found.`);
   }
 }
 
 export class UsedFileNotFoundError extends CodeError {
   constructor(pos: CodeLocation, filename: string) {
-    super(pos, `Used file '${filename} not found.'`);
+    super(pos, `Used file '${filename}' not found.`);
   }
 }
 

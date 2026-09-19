@@ -73,6 +73,27 @@ export class TooManyEInNumberLiteralLexingError extends LexingError {
 /**
  * @category Error
  */
+export class NumberLiteralOverflowLexingError extends LexingError {
+  constructor(pos: CodeLocation, lexeme: string) {
+    super(pos, `Number literal ${lexeme} is too large to be represented.`);
+  }
+}
+
+/**
+ * @category Error
+ */
+export class NumberLiteralUnderflowLexingError extends LexingError {
+  constructor(pos: CodeLocation, lexeme: string) {
+    super(
+      pos,
+      `Number literal ${lexeme} is too close to zero to be represented.`
+    );
+  }
+}
+
+/**
+ * @category Error
+ */
 export class InvalidNumberLiteralLexingError extends LexingError {
   constructor(pos: CodeLocation, lexeme: string) {
     super(pos, `Invalid number literal ${lexeme}.`);

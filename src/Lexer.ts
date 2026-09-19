@@ -4,6 +4,8 @@ import CodeSpan from "./CodeSpan";
 import ErrorCollector from "./ErrorCollector";
 import {
   InvalidNumberLiteralLexingError,
+  NumberLiteralOverflowLexingError,
+  NumberLiteralUnderflowLexingError,
   TooManyDotsInNumberLiteralLexingError,
   TooManyEInNumberLiteralLexingError,
   UnexpectedCharacterLexingError,
@@ -11,7 +13,12 @@ import {
   UnterminatedMultilineCommentLexingError,
   UnterminatedStringLiteralLexingError,
 } from "./errors/lexingErrors";
-import { UndefinedEscapeSequenceLexingWarning } from "./errors/lexingWarnings";
+import {
+  HexConstantTooLargeLexingWarning,
+  ImpreciseIntegerLexingWarning,
+  IntegerTooLargeLexingWarning,
+  UndefinedEscapeSequenceLexingWarning,
+} from "./errors/lexingWarnings";
 import {
   ExtraToken,
   MultiLineComment,
@@ -22,6 +29,9 @@ import keywords from "./keywords";
 import LiteralToken from "./LiteralToken";
 import Token from "./Token";
 import TokenType from "./TokenType";
+
+/** Largest hex constant OpenSCAD accepts without a "too large" warning (UINT64_MAX); bigger ones are clamped to it. */
+const MAX_HEX_CONSTANT = 2n ** 64n - 1n;
 
 /**
  * The lexer is responsible for turning a string of characters into a stream of
@@ -348,12 +358,49 @@ export default class Lexer {
       );
     }
     const value = parseFloat(lexeme);
-    if (isNaN(value) || !isFinite(value)) {
+    const isInteger = /^[0-9]+$/.test(lexeme);
+    if (isInteger && value === Infinity) {
+      this.errorCollector.reportWarning(
+        new IntegerTooLargeLexingWarning(this.start, lexeme)
+      );
+      this.addToken(TokenType.NumberLiteral, Number.MAX_VALUE);
+      return;
+    }
+    if (value === Infinity) {
+      throw this.errorCollector.reportError(
+        new NumberLiteralOverflowLexingError(this.getLoc(), lexeme)
+      );
+    }
+    if (isNaN(value)) {
       throw this.errorCollector.reportError(
         new InvalidNumberLiteralLexingError(this.getLoc(), lexeme)
       );
     }
+    if (value === 0 && /[1-9]/.test(lexeme.split(/e/i)[0])) {
+      throw this.errorCollector.reportError(
+        new NumberLiteralUnderflowLexingError(this.getLoc(), lexeme)
+      );
+    }
+    if (isInteger) {
+      this.warnIfImpreciseInteger(lexeme, value, BigInt(lexeme));
+    }
     this.addToken(TokenType.NumberLiteral, value);
+  }
+  /**
+   * Integers up to 2^53 always survive the trip through a double, so the
+   * (potentially long) BigInt comparison is only needed above that.
+   */
+  protected warnIfImpreciseInteger(
+    lexeme: string,
+    value: number,
+    exact: bigint
+  ) {
+    if (value <= Number.MAX_SAFE_INTEGER) return;
+    if (BigInt(value) !== exact) {
+      this.errorCollector.reportWarning(
+        new ImpreciseIntegerLexingWarning(this.start, lexeme)
+      );
+    }
   }
   protected consumeHexNumberLiteral() {
     this.advance(); // 0
@@ -365,7 +412,19 @@ export default class Lexer {
       this.start.char,
       this.charOffset
     );
-    this.addToken(TokenType.NumberLiteral, parseInt(lexeme.slice(2), 16));
+    const exact = BigInt(lexeme);
+    if (exact > MAX_HEX_CONSTANT) {
+      this.errorCollector.reportWarning(
+        new HexConstantTooLargeLexingWarning(this.start, lexeme)
+      );
+      // Clamp like OpenSCAD. parseInt would give a wrong (or Infinity) value,
+      // and OpenSCAD has no literal for Infinity.
+      this.addToken(TokenType.NumberLiteral, Number(MAX_HEX_CONSTANT));
+      return;
+    }
+    const value = parseInt(lexeme.slice(2), 16);
+    this.warnIfImpreciseInteger(lexeme, value, exact);
+    this.addToken(TokenType.NumberLiteral, value);
   }
   protected consumeIdentifierOrKeyword() {
     while (/[A-Za-z0-9_\$]/.test(this.peek()) && !this.isAtEnd()) {

@@ -1,5 +1,7 @@
 import * as exp from "constants";
 import { resolve } from "path";
+import AssignmentNode from "./ast/AssignmentNode";
+import { LiteralExpr, UnaryOpExpr } from "./ast/expressions";
 import CodeFile from "./CodeFile";
 import ErrorCollector from "./ErrorCollector";
 import LexingError from "./errors/LexingError";
@@ -11,6 +13,7 @@ import {
 } from "./extraTokens";
 import Lexer from "./Lexer";
 import LiteralToken from "./LiteralToken";
+import ParsingHelper from "./ParsingHelper";
 import Token from "./Token";
 import TokenType from "./TokenType";
 
@@ -374,6 +377,430 @@ describe("Lexer", () => {
         TokenType.Eot,
       ]);
     });
+
+    // Numbers are lexed into JS doubles, so by the time an interpreter sees the
+    // AST the original digits are gone. These mirror real OpenSCAD's warnings.
+    describe("precision warnings (matching real OpenSCAD)", () => {
+      function lexWithWarnings(source: string) {
+        const errorCollector = new ErrorCollector();
+        const tokens = new Lexer(
+          new CodeFile("<test>", source),
+          errorCollector
+        ).scan();
+        return { tokens, errorCollector };
+      }
+      function warningMessages(source: string) {
+        return lexWithWarnings(source).errorCollector.warnings.map(
+          (w) => w.message
+        );
+      }
+
+      it("warns when a hexadecimal constant does not fit in 64 bits", () => {
+        expect(warningMessages("0x10000000000000000")).toEqual([
+          `Hexadecimal constant "0x10000000000000000" too large.`,
+        ]);
+        expect(warningMessages("0x1ffffffffffffffff")).toEqual([
+          `Hexadecimal constant "0x1ffffffffffffffff" too large.`,
+        ]);
+      });
+      it("reports too-large hex as a LexingWarning, without an error", () => {
+        const { errorCollector } = lexWithWarnings("0x10000000000000000");
+        expect(errorCollector.hasErrors()).toBe(false);
+        expect(errorCollector.warnings).toHaveLength(1);
+        expect(errorCollector.warnings[0]).toBeInstanceOf(LexingWarning);
+      });
+      it("judges hex size by value, so leading zeros do not make it too large", () => {
+        expect(warningMessages("0x00000000000000000001")).toEqual([]);
+        expect(warningMessages("0x0000000000000000fffffffffffff800")).toEqual(
+          []
+        );
+      });
+
+      it("warns when a hexadecimal integer cannot be represented precisely", () => {
+        expect(warningMessages("0x1000000000000001")).toEqual([
+          `Integer "0x1000000000000001" cannot be represented precisely.`,
+        ]);
+        expect(warningMessages("0xfffffffffffffff0")).toEqual([
+          `Integer "0xfffffffffffffff0" cannot be represented precisely.`,
+        ]);
+        expect(warningMessages("0x7fffffffffffffff")).toEqual([
+          `Integer "0x7fffffffffffffff" cannot be represented precisely.`,
+        ]);
+        expect(warningMessages("0x20000000000001")).toEqual([
+          `Integer "0x20000000000001" cannot be represented precisely.`,
+        ]);
+      });
+      it("warns when a decimal integer cannot be represented precisely", () => {
+        expect(warningMessages("1152921504606846977")).toEqual([
+          `Integer "1152921504606846977" cannot be represented precisely.`,
+        ]);
+        expect(warningMessages("18446744073709551600")).toEqual([
+          `Integer "18446744073709551600" cannot be represented precisely.`,
+        ]);
+        expect(warningMessages("9007199254740993")).toEqual([
+          `Integer "9007199254740993" cannot be represented precisely.`,
+        ]);
+        expect(warningMessages("99999999999999999999999")).toEqual([
+          `Integer "99999999999999999999999" cannot be represented precisely.`,
+        ]);
+      });
+      it("warns about 0xffffffffffffffff, whose value really does change", () => {
+        // 2^64-1 is not a double, it rounds up to 2^64. Real OpenSCAD stays
+        // silent here only because of how its uint64 round-trip check saturates.
+        expect(warningMessages("0xffffffffffffffff")).toEqual([
+          `Integer "0xffffffffffffffff" cannot be represented precisely.`,
+        ]);
+      });
+
+      it("does not warn about integers that are exactly representable", () => {
+        expect(warningMessages("0")).toEqual([]);
+        expect(warningMessages("786")).toEqual([]);
+        expect(warningMessages("9007199254740991")).toEqual([]); // 2^53 - 1
+        expect(warningMessages("9007199254740992")).toEqual([]); // 2^53
+        expect(warningMessages("1152921504606846976")).toEqual([]); // 2^60
+        expect(warningMessages("18446744073709551616")).toEqual([]); // 2^64
+        expect(warningMessages("0x1000000000000000")).toEqual([]);
+        expect(warningMessages("0xfffffffffffff800")).toEqual([]); // 53 bits
+      });
+      it("does not warn about non-integer literals, however large", () => {
+        expect(warningMessages("9007199254740993.0")).toEqual([]);
+        expect(warningMessages("12345678901234567890.0")).toEqual([]);
+        expect(warningMessages("1e30")).toEqual([]);
+        expect(warningMessages("123456789012345678e2")).toEqual([]);
+      });
+
+      it("still produces the (rounded) number token alongside the warning", () => {
+        const { tokens } = lexWithWarnings("1152921504606846977");
+        expect(tokens[0]).toBeInstanceOf(LiteralToken);
+        expect((tokens[0] as LiteralToken<number>).value).toEqual(
+          1152921504606846976
+        );
+      });
+      it("points the warning at the start of the offending literal", () => {
+        const { errorCollector } = lexWithWarnings(
+          "a = 1;\nb = 1152921504606846977;"
+        );
+        const loc = errorCollector.warnings[0].codeLocation;
+        expect([loc.char, loc.line, loc.col]).toEqual([11, 1, 4]);
+      });
+      it("reports one warning per offending literal, in source order", () => {
+        expect(
+          warningMessages("a = [0x1000000000000001, 5, 18446744073709551600];")
+        ).toEqual([
+          `Integer "0x1000000000000001" cannot be represented precisely.`,
+          `Integer "18446744073709551600" cannot be represented precisely.`,
+        ]);
+      });
+      it("clamps a too-large hexadecimal constant to 2^64, like real OpenSCAD", () => {
+        const twoTo64 = 18446744073709551616;
+        const valueOf = (source: string) =>
+          (lexWithWarnings(source).tokens[0] as LiteralToken<number>).value;
+        expect(valueOf("0x10000000000000000")).toEqual(twoTo64);
+        expect(valueOf("0x1ffffffffffffffff")).toEqual(twoTo64);
+        // parseInt alone would give Infinity, which OpenSCAD has no literal for
+        expect(valueOf("0x" + "f".repeat(300))).toEqual(twoTo64);
+      });
+
+      describe("negation", () => {
+        // OpenSCAD has no negative literals: `-0x10` is unary minus applied to 0x10.
+        it("lexes a minus before a hex literal as a separate token", () => {
+          expect(lexToTTStream("-0x10;")).toEqual([
+            TokenType.Minus,
+            TokenType.NumberLiteral,
+            TokenType.Semicolon,
+            TokenType.Eot,
+          ]);
+          expect(lexToTTStream("x-0x10;")).toEqual([
+            TokenType.Identifier,
+            TokenType.Minus,
+            TokenType.NumberLiteral,
+            TokenType.Semicolon,
+            TokenType.Eot,
+          ]);
+        });
+        it("does not accept a sign between 0x and the digits - 0x is an identifier", () => {
+          expect(lexToTTStream("0x-10;")).toEqual([
+            TokenType.Identifier,
+            TokenType.Minus,
+            TokenType.NumberLiteral,
+            TokenType.Semicolon,
+            TokenType.Eot,
+          ]);
+        });
+        it("warns about the literal itself, not the minus", () => {
+          const { tokens, errorCollector } = lexWithWarnings(
+            "a = -0x1000000000000001;"
+          );
+          expect(errorCollector.warnings.map((w) => w.message)).toEqual([
+            `Integer "0x1000000000000001" cannot be represented precisely.`,
+          ]);
+          expect(errorCollector.warnings[0].codeLocation.col).toEqual(5);
+          expect((tokens[3] as LiteralToken<number>).value).toEqual(
+            0x1000000000000000
+          );
+        });
+        it("warns about a negated decimal integer by its unsigned literal", () => {
+          const { tokens, errorCollector } = lexWithWarnings(
+            "x = - 18446744073709551600;"
+          );
+          expect(errorCollector.warnings.map((w) => w.message)).toEqual([
+            `Integer "18446744073709551600" cannot be represented precisely.`,
+          ]);
+          // "x = - 1..." - the warning points at the digits, past the minus and space
+          expect(errorCollector.warnings[0].codeLocation.col).toEqual(6);
+          expect(tokens[2].type).toEqual(TokenType.Minus);
+          expect((tokens[3] as LiteralToken<number>).value).toEqual(
+            18446744073709551616
+          );
+        });
+        it("does not warn about a negated exactly-representable integer", () => {
+          expect(
+            lexWithWarnings("-9007199254740992").errorCollector.warnings
+          ).toHaveLength(0);
+          expect(
+            lexWithWarnings("-0x1000000000000000").errorCollector.warnings
+          ).toHaveLength(0);
+        });
+        it("clamps a negated 309-digit integer to -Number.MAX_VALUE", () => {
+          const { tokens, errorCollector } = lexWithWarnings(
+            "-" + "9".repeat(309)
+          );
+          expect(tokens[0].type).toEqual(TokenType.Minus);
+          expect((tokens[1] as LiteralToken<number>).value).toEqual(
+            Number.MAX_VALUE
+          );
+          expect(errorCollector.warnings).toHaveLength(1);
+        });
+        it("clamps and warns for a negated too-large hex constant", () => {
+          const { tokens, errorCollector } = lexWithWarnings(
+            "-0x1ffffffffffffffff"
+          );
+          expect(errorCollector.warnings.map((w) => w.message)).toEqual([
+            `Hexadecimal constant "0x1ffffffffffffffff" too large.`,
+          ]);
+          expect(tokens[0].type).toEqual(TokenType.Minus);
+          expect((tokens[1] as LiteralToken<number>).value).toEqual(
+            18446744073709551616
+          );
+        });
+      });
+
+      describe("decimal integers beyond the range of a double", () => {
+        it("keeps the (finite) value of a 308-digit integer and warns about it", () => {
+          const source = "9".repeat(308);
+          const { tokens, errorCollector } = lexWithWarnings(source);
+          expect((tokens[0] as LiteralToken<number>).value).toEqual(
+            Number(source)
+          );
+          expect(Number.isFinite(Number(source))).toBe(true);
+          expect(errorCollector.warnings.map((w) => w.message)).toEqual([
+            `Integer "${source}" cannot be represented precisely.`,
+          ]);
+        });
+        // Real OpenSCAD silently turns an integer that overflows a double into
+        // 2^64 - off by hundreds of orders of magnitude - and warns only that
+        // it is imprecise. There is no Infinity literal, so we saturate at
+        // the largest finite double instead, and say so.
+        it("clamps an integer that overflows a double to Number.MAX_VALUE", () => {
+          for (const source of [
+            "9".repeat(309),
+            "9".repeat(400),
+            "18" + "0".repeat(307), // 1.8e308, just past the largest double
+          ]) {
+            const { tokens, errorCollector } = lexWithWarnings(source);
+            expect((tokens[0] as LiteralToken<number>).value).toEqual(
+              Number.MAX_VALUE
+            );
+            expect(errorCollector.hasErrors()).toBe(false);
+            expect(errorCollector.warnings.map((w) => w.message)).toEqual([
+              `Integer "${source}" too large.`,
+            ]);
+            expect(errorCollector.warnings[0]).toBeInstanceOf(LexingWarning);
+          }
+        });
+        it("does not clamp an integer that still rounds to a finite double", () => {
+          // 17976931348623158e292 is past Number.MAX_VALUE's digits but rounds down to it
+          const source = "17976931348623158" + "0".repeat(292);
+          const { tokens, errorCollector } = lexWithWarnings(source);
+          expect((tokens[0] as LiteralToken<number>).value).toEqual(
+            Number.MAX_VALUE
+          );
+          expect(errorCollector.warnings.map((w) => w.message)).toEqual([
+            `Integer "${source}" cannot be represented precisely.`,
+          ]);
+        });
+        describe("float-form literals that overflow a double", () => {
+          const overflowing = [
+            "1e309",
+            "1e400",
+            "1.8e308",
+            "1" + "0".repeat(400) + ".0",
+          ];
+          it("throws a LexingError saying the literal is too large", () => {
+            for (const source of overflowing) {
+              expect(() => lexTokens(source)).toThrowError(LexingError);
+              expect(() => lexTokens(source)).toThrowError(
+                `Number literal ${source} is too large to be represented.`
+              );
+            }
+          });
+          it("reports exactly one error, not the generic invalid-literal one", () => {
+            for (const source of overflowing) {
+              const errorCollector = new ErrorCollector();
+              expect(() =>
+                new Lexer(
+                  new CodeFile("<test>", source),
+                  errorCollector
+                ).scan()
+              ).toThrow();
+              expect(errorCollector.errors.map((e) => e.message)).toEqual([
+                `Number literal ${source} is too large to be represented.`,
+              ]);
+            }
+          });
+          it("also rejects a huge exponent on an integer mantissa", () => {
+            expect(() => lexTokens("999e99999")).toThrowError(
+              "Number literal 999e99999 is too large to be represented."
+            );
+          });
+          it("accepts the largest double and anything that rounds down to it", () => {
+            for (const source of [
+              "1.7976931348623157e308",
+              "1.7976931348623158e308", // rounds down to MAX_VALUE
+              "179769313486231570000" + "0".repeat(288) + ".0",
+            ]) {
+              expect(testNumberLexing(source)).toEqual(Number.MAX_VALUE);
+            }
+          });
+          it("accepts them silently, with no warnings", () => {
+            const errorCollector = new ErrorCollector();
+            new Lexer(
+              new CodeFile("<test>", "1.7976931348623157e308"),
+              errorCollector
+            ).scan();
+            expect(errorCollector.hasErrors()).toBe(false);
+            expect(errorCollector.warnings).toEqual([]);
+          });
+          it("quotes the positive literal when it is negated", () => {
+            for (const source of overflowing) {
+              expect(() => lexTokens(`-${source}`)).toThrowError(
+                `Number literal ${source} is too large to be represented.`
+              );
+            }
+          });
+          describe("wherever a literal can appear", () => {
+            const contexts: [string, (lit: string) => string][] = [
+              ["an assignment", (lit) => `a = ${lit};`],
+              ["a negated assignment", (lit) => `a = -${lit};`],
+              ["an unused module body", (lit) => `module m() { x = ${lit}; }`],
+              ["a function argument", (lit) => `a = f(${lit});`],
+              ["an echo argument", (lit) => `echo(${lit});`],
+            ];
+            for (const [name, wrap] of contexts) {
+              it(`rejects the file when it is in ${name}`, () => {
+                for (const source of overflowing) {
+                  const [ast, errorCollector] = ParsingHelper.parseFile(
+                    new CodeFile("<test>", wrap(source))
+                  );
+                  expect(ast).toBeNull();
+                  expect(errorCollector.errors).toHaveLength(1);
+                  expect(errorCollector.errors[0]).toBeInstanceOf(LexingError);
+                  expect(errorCollector.errors[0].message).toEqual(
+                    `Number literal ${source} is too large to be represented.`
+                  );
+                }
+              });
+            }
+            it("still parses the largest double", () => {
+              for (const [, wrap] of contexts) {
+                const [ast, errorCollector] = ParsingHelper.parseFile(
+                  new CodeFile("<test>", wrap("1.7976931348623157e308"))
+                );
+                expect(errorCollector.hasErrors()).toBe(false);
+                expect(ast).not.toBeNull();
+              }
+            });
+          });
+        });
+        it("throws a LexingError for a nonzero literal that rounds to zero", () => {
+          for (const source of [
+            "1e-400",
+            "1.5e-999",
+            "2e-324",
+            "0.0000001e-320",
+            "2.4703282292062327e-324",
+          ]) {
+            expect(() => lexTokens(source)).toThrowError(
+              `Number literal ${source} is too close to zero to be represented.`
+            );
+          }
+        });
+        it("accepts literals that round to a nonzero subnormal", () => {
+          for (const source of [
+            "5e-324",
+            "3e-324",
+            "1e-310",
+            "2.4703282292062328e-324",
+          ]) {
+            expect(testNumberLexing(source)).toEqual(Number(source));
+          }
+        });
+        it("accepts zero literals however negative the exponent", () => {
+          for (const source of ["0e-999", "0.0", "0.000e-500", "0e0"]) {
+            expect(testNumberLexing(source)).toEqual(0);
+          }
+        });
+        it("never emits a non-finite number literal", () => {
+          for (const source of [
+            "9".repeat(400),
+            "0x" + "f".repeat(300),
+            "18" + "0".repeat(307),
+          ]) {
+            const value = (lexTokens(source)[0] as LiteralToken<number>).value;
+            expect(Number.isFinite(value)).toBe(true);
+          }
+        });
+      });
+
+      it("treats inf and nan as ordinary identifiers, not number literals", () => {
+        // OpenSCAD has no such constants either; only 1/0 and 0/0 produce them.
+        expect(lexToTTStream("inf; nan;")).toEqual([
+          TokenType.Identifier,
+          TokenType.Semicolon,
+          TokenType.Identifier,
+          TokenType.Semicolon,
+          TokenType.Eot,
+        ]);
+      });
+
+      it("gives the AST unary minus around the clamped or rounded literal", () => {
+        const cases: [string, number][] = [
+          ["a = -0x1ffffffffffffffff;", 18446744073709551616],
+          ["a = -1152921504606846977;", 1152921504606846976],
+        ];
+        for (const [source, expected] of cases) {
+          const [ast, errorCollector] = ParsingHelper.parseFile(
+            new CodeFile("<test>", source)
+          );
+          expect(errorCollector.hasErrors()).toBe(false);
+          expect(errorCollector.warnings).toHaveLength(1);
+          const value = (ast!.statements[0] as AssignmentNode).value;
+          expect(value).toBeInstanceOf(UnaryOpExpr);
+          const unary = value as UnaryOpExpr;
+          expect(unary.operation).toEqual(TokenType.Minus);
+          expect(unary.right).toBeInstanceOf(LiteralExpr);
+          expect(unary.right).toHaveProperty("value", expected);
+        }
+      });
+      it("does not stop ParsingHelper from returning an AST", () => {
+        const [ast, errorCollector] = ParsingHelper.parseFile(
+          new CodeFile("<test>", "a = 0x10000000000000000;")
+        );
+        expect(ast).not.toBeNull();
+        expect(errorCollector.hasErrors()).toBe(false);
+        expect(errorCollector.warnings).toHaveLength(1);
+      });
+    });
   });
 
   describe("bitwise and shift operator lexing", () => {
@@ -549,9 +976,7 @@ describe("Lexer", () => {
         );
       });
       it("only consumes the first 6 hex digits of \\U, leaving the rest literal", () => {
-        expect(testStringLexing(`"big\\U0001F600end"`)).toEqual(
-          "bigǶ00end"
-        );
+        expect(testStringLexing(`"big\\U0001F600end"`)).toEqual("bigǶ00end");
       });
       it("decodes codepoint 0 to a space", () => {
         expect(testStringLexing(`"zero\\u0000end"`)).toEqual("zero end");
@@ -560,9 +985,7 @@ describe("Lexer", () => {
         expect(testStringLexing(`"surr\\uD800end"`)).toEqual("surr end");
       });
       it("decodes a codepoint above U+10FFFF to a space", () => {
-        expect(testStringLexing(`"toobig\\U110000end"`)).toEqual(
-          "toobig end"
-        );
+        expect(testStringLexing(`"toobig\\U110000end"`)).toEqual("toobig end");
       });
       it("falls back to a warning when there aren't enough hex digits", () => {
         const { value, errorCollector } = lexOneString(`"short\\u12end"`);
