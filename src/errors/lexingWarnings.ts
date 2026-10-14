@@ -19,7 +19,7 @@ export class UndefinedEscapeSequenceLexingWarning extends LexingWarning {
  */
 export class HexConstantTooLargeLexingWarning extends LexingWarning {
   constructor(pos: CodeLocation, lexeme: string) {
-    super(pos, `Hexadecimal constant "${lexeme}" too large.`);
+    super(pos, `Hexadecimal constant "${lexeme}" too large. Clamped to 2^64.`);
   }
 }
 
@@ -32,17 +32,5 @@ export class HexConstantTooLargeLexingWarning extends LexingWarning {
 export class ImpreciseIntegerLexingWarning extends LexingWarning {
   constructor(pos: CodeLocation, lexeme: string) {
     super(pos, `Integer "${lexeme}" cannot be represented precisely.`);
-  }
-}
-
-/**
- * Reported when a decimal integer literal overflows a double. Real OpenSCAD
- * silently turns it into 2^64; we clamp to Number.MAX_VALUE instead, as there
- * is no Infinity literal.
- * @category Warning
- */
-export class IntegerTooLargeLexingWarning extends LexingWarning {
-  constructor(pos: CodeLocation, lexeme: string) {
-    super(pos, `Integer "${lexeme}" too large.`);
   }
 }

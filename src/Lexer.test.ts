@@ -397,10 +397,10 @@ describe("Lexer", () => {
 
       it("warns when a hexadecimal constant does not fit in 64 bits", () => {
         expect(warningMessages("0x10000000000000000")).toEqual([
-          `Hexadecimal constant "0x10000000000000000" too large.`,
+          `Hexadecimal constant "0x10000000000000000" too large. Clamped to 2^64.`,
         ]);
         expect(warningMessages("0x1ffffffffffffffff")).toEqual([
-          `Hexadecimal constant "0x1ffffffffffffffff" too large.`,
+          `Hexadecimal constant "0x1ffffffffffffffff" too large. Clamped to 2^64.`,
         ]);
       });
       it("reports too-large hex as a LexingWarning, without an error", () => {
@@ -561,22 +561,12 @@ describe("Lexer", () => {
             lexWithWarnings("-0x1000000000000000").errorCollector.warnings
           ).toHaveLength(0);
         });
-        it("clamps a negated 309-digit integer to -Number.MAX_VALUE", () => {
-          const { tokens, errorCollector } = lexWithWarnings(
-            "-" + "9".repeat(309)
-          );
-          expect(tokens[0].type).toEqual(TokenType.Minus);
-          expect((tokens[1] as LiteralToken<number>).value).toEqual(
-            Number.MAX_VALUE
-          );
-          expect(errorCollector.warnings).toHaveLength(1);
-        });
         it("clamps and warns for a negated too-large hex constant", () => {
           const { tokens, errorCollector } = lexWithWarnings(
             "-0x1ffffffffffffffff"
           );
           expect(errorCollector.warnings.map((w) => w.message)).toEqual([
-            `Hexadecimal constant "0x1ffffffffffffffff" too large.`,
+            `Hexadecimal constant "0x1ffffffffffffffff" too large. Clamped to 2^64.`,
           ]);
           expect(tokens[0].type).toEqual(TokenType.Minus);
           expect((tokens[1] as LiteralToken<number>).value).toEqual(
@@ -597,44 +587,35 @@ describe("Lexer", () => {
             `Integer "${source}" cannot be represented precisely.`,
           ]);
         });
-        // Real OpenSCAD silently turns an integer that overflows a double into
-        // 2^64 - off by hundreds of orders of magnitude - and warns only that
-        // it is imprecise. There is no Infinity literal, so we saturate at
-        // the largest finite double instead, and say so.
-        it("clamps an integer that overflows a double to Number.MAX_VALUE", () => {
-          for (const source of [
-            "9".repeat(309),
-            "9".repeat(400),
-            "18" + "0".repeat(307), // 1.8e308, just past the largest double
-          ]) {
+        it("does not reject an integer that still rounds to a finite double", () => {
+          // 17976931348623158e292 is past Number.MAX_VALUE's digits but rounds down to it
+          const sources = [
+            "17976931348623158" + "0".repeat(292),
+            (2n ** 1024n - 2n ** 970n - 1n).toString(), // largest that rounds down
+          ];
+          for (const source of sources) {
             const { tokens, errorCollector } = lexWithWarnings(source);
             expect((tokens[0] as LiteralToken<number>).value).toEqual(
               Number.MAX_VALUE
             );
-            expect(errorCollector.hasErrors()).toBe(false);
             expect(errorCollector.warnings.map((w) => w.message)).toEqual([
-              `Integer "${source}" too large.`,
+              `Integer "${source}" cannot be represented precisely.`,
             ]);
-            expect(errorCollector.warnings[0]).toBeInstanceOf(LexingWarning);
           }
         });
-        it("does not clamp an integer that still rounds to a finite double", () => {
-          // 17976931348623158e292 is past Number.MAX_VALUE's digits but rounds down to it
-          const source = "17976931348623158" + "0".repeat(292);
-          const { tokens, errorCollector } = lexWithWarnings(source);
-          expect((tokens[0] as LiteralToken<number>).value).toEqual(
-            Number.MAX_VALUE
-          );
-          expect(errorCollector.warnings.map((w) => w.message)).toEqual([
-            `Integer "${source}" cannot be represented precisely.`,
-          ]);
-        });
-        describe("float-form literals that overflow a double", () => {
+        describe("literals that overflow a double", () => {
+          // Integers are rejected exactly when their `.0` form would be.
           const overflowing = [
             "1e309",
             "1e400",
             "1.8e308",
             "1" + "0".repeat(400) + ".0",
+            "9".repeat(309),
+            "9".repeat(400),
+            "18" + "0".repeat(307),
+            (2n ** 1024n - 2n ** 970n).toString(), // smallest that rounds up
+            (2n ** 1024n).toString(),
+            "1" + "0".repeat(309),
           ];
           it("throws a LexingError saying the literal is too large", () => {
             for (const source of overflowing) {
@@ -648,10 +629,7 @@ describe("Lexer", () => {
             for (const source of overflowing) {
               const errorCollector = new ErrorCollector();
               expect(() =>
-                new Lexer(
-                  new CodeFile("<test>", source),
-                  errorCollector
-                ).scan()
+                new Lexer(new CodeFile("<test>", source), errorCollector).scan()
               ).toThrow();
               expect(errorCollector.errors.map((e) => e.message)).toEqual([
                 `Number literal ${source} is too large to be represented.`,
@@ -751,11 +729,7 @@ describe("Lexer", () => {
           }
         });
         it("never emits a non-finite number literal", () => {
-          for (const source of [
-            "9".repeat(400),
-            "0x" + "f".repeat(300),
-            "18" + "0".repeat(307),
-          ]) {
+          for (const source of ["0x" + "f".repeat(300)]) {
             const value = (lexTokens(source)[0] as LiteralToken<number>).value;
             expect(Number.isFinite(value)).toBe(true);
           }

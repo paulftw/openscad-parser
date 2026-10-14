@@ -16,7 +16,6 @@ import {
 import {
   HexConstantTooLargeLexingWarning,
   ImpreciseIntegerLexingWarning,
-  IntegerTooLargeLexingWarning,
   UndefinedEscapeSequenceLexingWarning,
 } from "./errors/lexingWarnings";
 import {
@@ -359,13 +358,6 @@ export default class Lexer {
     }
     const value = parseFloat(lexeme);
     const isInteger = /^[0-9]+$/.test(lexeme);
-    if (isInteger && value === Infinity) {
-      this.errorCollector.reportWarning(
-        new IntegerTooLargeLexingWarning(this.start, lexeme)
-      );
-      this.addToken(TokenType.NumberLiteral, Number.MAX_VALUE);
-      return;
-    }
     if (value === Infinity) {
       throw this.errorCollector.reportError(
         new NumberLiteralOverflowLexingError(this.getLoc(), lexeme)
