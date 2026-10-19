@@ -8,7 +8,7 @@ import ASTVisitor from "./ASTVisitor";
 export default abstract class ASTNode {
   // A node's tokens are fixed once parsed, and its span is read on every
   // evaluation step, so the combination is done once.
-  #span?: CodeSpan;
+  #span?: WeakRef<CodeSpan>;
 
   constructor() {}
 
@@ -17,10 +17,15 @@ export default abstract class ASTNode {
   abstract accept<R>(visitor: ASTVisitor<R>): R;
 
   get span(): CodeSpan {
-    return (this.#span ??= CodeSpan.combine(
-      ...Object.values(this.tokens)
-        .flat()
-        .map((t) => t?.span)
-    ));
+    let span = this.#span?.deref();
+    if (!span) {
+      span = CodeSpan.combine(
+        ...Object.values(this.tokens)
+          .flat()
+          .map((t) => t?.span)
+      );
+      this.#span = new WeakRef(span);
+    }
+    return span;
   }
 }
